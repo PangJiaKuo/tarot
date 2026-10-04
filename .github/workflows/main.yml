@@ -35,9 +35,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # Android SDK is preinstalled on GitHub-hosted runners; no setup action needed.
       - name: Generate Android WebView project
         run: |
           set -e
