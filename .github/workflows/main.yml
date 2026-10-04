@@ -43,6 +43,20 @@ jobs:
           mkdir -p "$APP_DIR" android/app/src/main/assets
 
           cat > android/settings.gradle <<'GRADLE'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
           rootProject.name = "MysticTarot"
           include ':app'
           GRADLE
