@@ -1,0 +1,156 @@
+name: Build Tarot APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app (relative base for WebView assets)
+        run: |
+          npx tsc -b
+          npx vite build --base=./
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Android WebView project
+        run: |
+          set -e
+          APP_DIR="android/app/src/main/java/com/mystictarot/app"
+          mkdir -p "$APP_DIR" android/app/src/main/assets
+
+          cat > android/settings.gradle <<'GRADLE'
+          rootProject.name = "MysticTarot"
+          include ':app'
+          GRADLE
+
+          cat > android/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          GRADLE
+
+          cat > android/gradle.properties <<'GRADLE'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          GRADLE
+
+          cat > android/app/build.gradle <<'GRADLE'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.mystictarot.app'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.mystictarot.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+          }
+          GRADLE
+
+          cat > android/app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="神秘塔罗"
+                  android:allowBackup="false"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@android:style/Theme.NoTitleBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          XML
+
+          cat > "$APP_DIR/MainActivity.kt" <<'KOTLIN'
+          package com.mystictarot.app
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+
+          class MainActivity : Activity() {
+              private lateinit var webView: WebView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  webView = WebView(this)
+                  webView.settings.javaScriptEnabled = true
+                  webView.settings.domStorageEnabled = true
+                  webView.settings.allowFileAccess = true
+                  webView.settings.mediaPlaybackRequiresUserGesture = false
+                  webView.settings.setSupportZoom(false)
+                  webView.webViewClient = WebViewClient()
+                  webView.setBackgroundColor(0)
+                  setContentView(webView)
+                  webView.loadUrl("file:///android_asset/index.html")
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onBackPressed() {
+                  if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+              }
+          }
+          KOTLIN
+
+      - name: Copy web build into assets
+        run: cp -r dist/* android/app/src/main/assets/
+
+      - name: Download Gradle
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip -q gradle-8.7-bin.zip
+
+      - name: Assemble APK
+        run: ./gradle-8.7/bin/gradle -p android assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarot-apk
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
